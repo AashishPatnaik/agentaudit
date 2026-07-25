@@ -1,0 +1,27 @@
+[project]
+name = "agentaudit-mcp"
+version = "0.1.0"
+description = "Read-only MCP server exposing the AusRegBench pgvector corpus for AgentAudit."
+requires-python = ">=3.12"
+dependencies = [
+    "mcp>=1.2.0",
+    "psycopg2-binary>=2.9.10",
+    "pgvector>=0.4.1",
+    "openai>=1.50.0",
+    "pydantic>=2.7",
+    "python-dotenv>=1.0",
+    "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+agentaudit-mcp = "agentaudit_mcp.server:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

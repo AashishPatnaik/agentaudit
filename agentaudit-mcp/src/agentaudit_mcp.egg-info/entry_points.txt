@@ -1,0 +1,2 @@
+[console_scripts]
+agentaudit-mcp = agentaudit_mcp.server:main

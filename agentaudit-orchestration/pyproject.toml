@@ -1,0 +1,22 @@
+[project]
+name = "agentaudit-orchestration"
+version = "0.1.0"
+description = "Coordinator, specialist subagents, and synthesis agent for AgentAudit, built on the Claude Agent SDK routed through Bedrock."
+requires-python = ">=3.12"
+dependencies = [
+    "claude-agent-sdk>=0.2.128",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+agentaudit-orchestration = "agentaudit_orchestration.run_example:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

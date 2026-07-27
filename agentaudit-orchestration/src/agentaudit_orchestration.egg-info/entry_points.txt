@@ -1,2 +1,0 @@
-[console_scripts]
-agentaudit-orchestration = agentaudit_orchestration.run_example:main

@@ -3,6 +3,8 @@ from __future__ import annotations
 from claude_agent_sdk import ClaudeAgentOptions
 
 from agentaudit_orchestration.agents import RESEARCH_AGENTS
+from agentaudit_orchestration.answer_schema import FinalAnswer
+from agentaudit_orchestration.audit import build_audit_hooks
 from agentaudit_orchestration.config import load_bedrock_env, mcp_server_config
 
 COORDINATOR_SYSTEM_PROMPT = (
@@ -25,8 +27,11 @@ COORDINATOR_SYSTEM_PROMPT = (
     "it has nothing to check yet without their output.\n"
     "4. Once cross-reference-checker has returned, invoke the "
     "synthesis-agent subagent with all three researchers' combined "
-    "findings and the original question, and give its output as your "
-    "final answer verbatim.\n\n"
+    "findings and the original question.\n"
+    "5. Give your final response as JSON matching the required schema: "
+    "`answer` (the synthesis agent's merged text, verbatim) and `citations` "
+    "(every (source, paragraph_id) the synthesis agent cited, each with a "
+    "one-line `supports` description of the claim it backs).\n\n"
     "Never state a citation yourself — only the subagents' verified "
     "findings, merged by the synthesis agent, may appear in the final "
     "answer."
@@ -40,4 +45,6 @@ def build_options() -> ClaudeAgentOptions:
         agents=RESEARCH_AGENTS,
         allowed_tools=["Agent", "mcp__agentaudit-mcp__*"],
         env=load_bedrock_env(),
+        hooks=build_audit_hooks(),
+        output_format={"type": "json_schema", "schema": FinalAnswer.model_json_schema()},
     )

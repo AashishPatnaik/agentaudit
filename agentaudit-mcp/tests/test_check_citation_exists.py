@@ -49,10 +49,40 @@ def test_falls_back_to_containing_section(mock_get_connection):
 
 @patch("agentaudit_mcp.tools.check_citation_exists.get_connection")
 def test_no_match_at_any_level(mock_get_connection):
-    fake_get_connection, mock_cursor = _mock_get_connection([0, 0])
+    fake_get_connection, _mock_cursor = _mock_get_connection([0, 0])
     mock_get_connection.side_effect = fake_get_connection
 
     result = check_citation_exists(source="corporations_act_2001", paragraph_id="999Z(1)")
 
     assert result.exists is False
     assert result.matched_paragraph_id is None
+
+
+@patch("agentaudit_mcp.tools.check_citation_exists.get_connection")
+def test_leading_s_prefix_is_stripped_before_matching(mock_get_connection):
+    fake_get_connection, mock_cursor = _mock_get_connection([1])
+    mock_get_connection.side_effect = fake_get_connection
+
+    result = check_citation_exists(source="corporations_act_2001", paragraph_id="s912A(5)")
+
+    assert result.exists is True
+    assert result.paragraph_id == "s912A(5)"
+    assert result.matched_paragraph_id == "912A(5)"
+    mock_cursor.execute.assert_called_once()
+    args, _ = mock_cursor.execute.call_args
+    assert args[1] == ("corporations_act_2001", "912A(5)")
+
+
+@patch("agentaudit_mcp.tools.check_citation_exists.get_connection")
+def test_leading_para_prefix_is_stripped_before_matching(mock_get_connection):
+    fake_get_connection, mock_cursor = _mock_get_connection([1])
+    mock_get_connection.side_effect = fake_get_connection
+
+    result = check_citation_exists(source="cps234", paragraph_id="para 14")
+
+    assert result.exists is True
+    assert result.paragraph_id == "para 14"
+    assert result.matched_paragraph_id == "14"
+    mock_cursor.execute.assert_called_once()
+    args, _ = mock_cursor.execute.call_args
+    assert args[1] == ("cps234", "14")

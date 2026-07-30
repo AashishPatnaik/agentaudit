@@ -19,43 +19,15 @@ def _connect() -> psycopg2.extensions.connection:
     for attempt in range(_MAX_RETRIES):
         try:
             conn = psycopg2.connect(os.environ["DATABASE_URL"])
-            # Explicit readonly=False, not just omitted: DATABASE_URL may be
-            # served through a connection pooler (Neon's pooler endpoint)
-            # that reuses physical backend connections across logical
-            # clients. agentaudit_mcp's own connections set readonly=True;
-            # leaving this unset (readonly=None, "inherit") let a pooled
-            # connection pick up that lingering read-only session state.
-            conn.set_session(autocommit=True, readonly=False)
-
-            with conn.cursor() as cur:
-                cur.execute("SHOW transaction_read_only")
-                (still_read_only,) = cur.fetchone()
-            if still_read_only == "on":
-                # Empirically confirmed, not just theoretical: under
-                # concurrent load (parallel subagents each opening their own
-                # audit connection), the pooler can still hand back a
-                # backend carrying read-only session state even after the
-                # explicit override above — 10/134 tool-call writes hit
-                # exactly this in one live run before this check existed.
-                # A fresh connection attempt tends to land on a different
-                # backend, so retry immediately rather than trust the
-                # override blindly.
-                conn.close()
-                continue
-
+            conn.autocommit = False
             return conn
         except psycopg2.OperationalError as exc:
             last_error = exc
             if attempt < _MAX_RETRIES - 1:
                 time.sleep(_RETRY_DELAY_SECONDS)
 
-    if last_error is not None:
-        raise last_error
-    raise RuntimeError(
-        "Could not obtain a write-capable connection to DATABASE_URL after "
-        f"{_MAX_RETRIES} attempts — the pooled backend kept returning a "
-        "read-only session."
-    )
+    assert last_error is not None
+    raise last_error
 
 
 @contextmanager
@@ -63,12 +35,41 @@ def get_audit_connection() -> Iterator[psycopg2.extensions.connection]:
     """Write-capable connection to the same Neon instance as
     agentaudit_mcp.db.get_connection(), for AgentAudit-owned tables only
     (audit_log, human_review_flags) — never for corpus_chunks, which stays
-    read-only via that other module. Unlike agentaudit_mcp's connection,
-    this one is not put into Postgres read-only mode.
+    read-only via that other module.
+
+    DATABASE_URL is a Neon pooler endpoint operating in transaction-pooling
+    mode: the pooler pins one physical backend for the duration of a single
+    transaction, but is free to hand a *different* backend to the next
+    transaction on the same logical connection. A session-level override
+    (the previous `conn.set_session(readonly=False)`, issued once at
+    connect time) only reliably covered the first transaction — with
+    autocommit on, every later statement was its own implicit transaction
+    and could land on a backend that never saw that override, still
+    carrying read-only state left by one of agentaudit_mcp's own
+    `readonly=True` connections. Confirmed live: "cannot execute INSERT in
+    a read-only transaction" recurring intermittently throughout a run,
+    well after an earlier write on the same logical connection succeeded.
+
+    Fix: autocommit off, and `SET LOCAL default_transaction_read_only =
+    off` issued as the first statement of the transaction, immediately
+    before yielding. SET LOCAL is scoped to the current transaction, and
+    the pooler guarantees one backend for that transaction's whole
+    lifetime (BEGIN through COMMIT/ROLLBACK) — so it's guaranteed to apply
+    to whatever backend actually executes the caller's write, regardless
+    of that backend's prior state. Callers need no changes: every existing
+    call site already does exactly one write per `get_audit_connection()`
+    context, which is exactly the unit this fix operates on. Commits on
+    clean exit, rolls back on exception.
     """
     conn = _connect()
     try:
+        with conn.cursor() as cur:
+            cur.execute("SET LOCAL default_transaction_read_only = off")
         yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 

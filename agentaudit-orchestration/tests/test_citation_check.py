@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock, patch
 
 from agentaudit_mcp.tools.check_citation_exists import CitationCheckResult
+
 from agentaudit_orchestration.answer_schema import Citation
 from agentaudit_orchestration.citation_check import cross_check_citations
 

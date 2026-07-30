@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from typing import Literal
 
+from agentaudit_mcp.tools.check_citation_exists import check_citation_exists
 from pydantic import BaseModel
 
-from agentaudit_mcp.tools.check_citation_exists import check_citation_exists
 from agentaudit_orchestration.answer_schema import Citation
 from agentaudit_orchestration.audit import write_audit_row
 from agentaudit_orchestration.db import get_audit_connection

@@ -87,7 +87,7 @@ def test_post_tool_use_failure_writes_error_row(mock_get_conn):
     _run(callback(input_data, "tool-use-3", {}))
 
     _, params = cursor.execute.call_args[0]
-    run_id, event_type, agent_name, _, _, _, output_json, status, _ = params
+    _run_id, event_type, agent_name, _, _, _, output_json, status, _ = params
     assert event_type == "tool_call_error"
     assert status == "error"
     assert agent_name == "prudential-standards-researcher"

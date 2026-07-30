@@ -31,7 +31,14 @@ LEGISLATION_RESEARCHER = AgentDefinition(
         "- check_citation_exists_tool to verify any citation before "
         "reporting it.\n"
         "- get_related_provisions_tool to surface cross-references worth "
-        "flagging.\n\n" + _VERIFY_RULES
+        "flagging.\n\n"
+        "Report back concisely: only the specific citations that directly "
+        "answer the question, each with a brief one-to-two sentence note of "
+        "what it establishes — not a full paragraph-by-paragraph account of "
+        "everything you checked. If a provision turned out irrelevant, "
+        "don't describe it or explain why — just leave it out. The "
+        "coordinator needs your verified answer, not your research "
+        "process.\n\n" + _VERIFY_RULES
     ),
     tools=_MCP_TOOLS,
 )
@@ -58,7 +65,14 @@ PRUDENTIAL_STANDARDS_RESEARCHER = AgentDefinition(
         "- check_citation_exists_tool to verify any citation before "
         "reporting it.\n"
         "- get_related_provisions_tool to surface cross-references worth "
-        "flagging.\n\n" + _VERIFY_RULES
+        "flagging.\n\n"
+        "Report back concisely: only the specific citations that directly "
+        "answer the question, each with a brief one-to-two sentence note of "
+        "what it establishes — not a full paragraph-by-paragraph account of "
+        "everything you checked. If a provision turned out irrelevant, "
+        "don't describe it or explain why — just leave it out. The "
+        "coordinator needs your verified answer, not your research "
+        "process.\n\n" + _VERIFY_RULES
     ),
     tools=_MCP_TOOLS,
 )
@@ -76,15 +90,24 @@ CROSS_REFERENCE_CHECKER = AgentDefinition(
         "and prudential-standards-researcher subagents. Your job:\n"
         "- Use check_citation_exists_tool to verify every citation you are "
         "handed — flag any that don't resolve.\n"
-        "- Use get_related_provisions_tool on each verified citation to "
-        "find explicit or semantic cross-references, especially links "
-        "between Corporations Act 2001 / Banking Act 1959 provisions and "
-        "CPS 220/230/234 standards.\n"
-        "- Use get_provision_text_tool when you need a related provision's "
-        "full text to judge whether it's actually relevant.\n\n"
-        "Report back which citations verified, which didn't, and what "
-        "cross-references you found, each backed by an exact (source, "
-        "paragraph_id)."
+        "- Use get_related_provisions_tool on each verified citation, but "
+        "stop at its top 2 candidates per citation — do not chase every "
+        "candidate it returns. Only look for links between Corporations "
+        "Act 2001 / Banking Act 1959 provisions and CPS 220/230/234 "
+        "standards; skip cross-references within the same act/standard.\n"
+        "- Only call get_provision_text_tool on a related provision if its "
+        "paragraph reference and snippet from get_related_provisions_tool "
+        "genuinely don't tell you whether it's relevant — most of the time "
+        "they will, and a full-text fetch isn't needed.\n\n"
+        "You are reconciling findings from multiple researchers, which can "
+        "involve many citations on a complex question — budget your work "
+        "accordingly: if a citation's related provisions are clearly "
+        "irrelevant from their snippets alone, say so in one line and move "
+        "on rather than investigating every one in depth.\n\n"
+        "Report back concisely: which citations verified, which didn't, "
+        "and only the cross-references you actually confirmed, each backed "
+        "by an exact (source, paragraph_id). Do not include provisions you "
+        "checked and ruled out — just state how many you ruled out."
     ),
     tools=_MCP_TOOLS,
 )

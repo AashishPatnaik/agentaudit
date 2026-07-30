@@ -38,8 +38,31 @@ COORDINATOR_SYSTEM_PROMPT = (
 )
 
 
+def _log_cli_stderr(line: str) -> None:
+    print(f"[claude-cli stderr] {line}", flush=True)
+
+
 def build_options() -> ClaudeAgentOptions:
     return ClaudeAgentOptions(
+        # Confirmed against `aws bedrock list-inference-profiles` for this
+        # account/ap-southeast-2 — the CLI's unpinned default resolved to
+        # apac.anthropic.claude-opus-5, which doesn't exist in this account.
+        # au.anthropic.claude-opus-5 is a valid, ACTIVE profile, but this
+        # account has no Bedrock access to any Claude 5-generation model
+        # (confirmed via AccessDeniedException on a direct Converse call —
+        # see CLAUDE.md's Stack section). Pinned to the newest generation
+        # this account is actually entitled to until that's granted.
+        model="au.anthropic.claude-sonnet-4-6",
+        # Default permission_mode prompts for approval on tool calls it
+        # doesn't recognize as pre-authorized — fine for run_example.py's
+        # interactive terminal, but this runs headless in AgentCore Runtime
+        # with no one to answer a prompt, so it hangs indefinitely instead
+        # (confirmed 2026-07-29: a real invocation produced genuine research
+        # output, then went silent for 10+ minutes with no error and no
+        # further progress). bypassPermissions is scoped by allowed_tools
+        # below either way, so this doesn't open up anything beyond Agent/
+        # mcp__agentaudit-mcp__* dispatch.
+        permission_mode="bypassPermissions",
         system_prompt=COORDINATOR_SYSTEM_PROMPT,
         mcp_servers=mcp_server_config(),
         agents=RESEARCH_AGENTS,
@@ -47,4 +70,5 @@ def build_options() -> ClaudeAgentOptions:
         env=load_bedrock_env(),
         hooks=build_audit_hooks(),
         output_format={"type": "json_schema", "schema": FinalAnswer.model_json_schema()},
+        stderr=_log_cli_stderr,
     )

@@ -8,10 +8,12 @@ dependencies = [
     "python-dotenv>=1.0",
     "pydantic>=2.7",
     "psycopg2-binary>=2.9.10",
+    "bedrock-agentcore>=1.18.1",
+    "boto3>=1.34",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "ruff>=0.6"]
 
 [project.scripts]
 agentaudit-orchestration = "agentaudit_orchestration.run_example:main"
@@ -22,3 +24,19 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+agentaudit_orchestration = ["schema.sql"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 110
+
+[tool.ruff.lint]
+# BLE001 (no blind `except Exception`) is ignored deliberately:
+# agentcore_app.py's invoke() wraps every internal failure as {"error": ...}
+# JSON rather than propagating a raw 500 — the dashboard has no
+# claude-agent-sdk of its own and depends on this endpoint always
+# returning clean JSON, success or failure. That's a considered design
+# choice, not an oversight a linter should flag.
+ignore = ["BLE001"]

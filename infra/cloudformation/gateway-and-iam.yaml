@@ -1,0 +1,231 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  AgentAudit — MCP Gateway (Cognito JWT authorizer) fronting the
+  agentaudit-mcp Runtime, plus the Secrets Manager entries and scoped IAM
+  roles the agentcore CLI / manual Runtime creation didn't already cover.
+  See docs/adr/0002-mcp-gateway-transport.md for why this hop is JWT
+  (Gateway inbound) over IAM (Gateway outbound to agentaudit-mcp).
+
+Parameters:
+  AgentAuditMcpRuntimeId:
+    Type: String
+    Description: >
+      Runtime ID (not full ARN) of the already-deployed agentaudit-mcp
+      AgentCore Runtime, e.g. agentaudit_mcp-syU9wn2NjI — created via
+      `agentcore deploy`, not part of this stack. The real ARN and the
+      Gateway target's fully percent-encoded invocation URL are both
+      constructed from this plus the account/region pseudo parameters,
+      matching the exact encoding botocore itself uses for
+      InvokeAgentRuntime (verified directly against the installed SDK,
+      not assumed — every ':' and '/' in the ARN is percent-encoded as a
+      single opaque path segment: %3A and %2F respectively).
+
+  OrchestrationExecutionRoleName:
+    Type: String
+    Default: AmazonBedrockAgentCoreSDKRuntime-agentaudit-orchestration
+    Description: >
+      Friendly name of the agentaudit_orchestration Runtime's existing
+      execution role (created manually, not by this stack — see ADR 0002).
+      AWS::IAM::ManagedPolicy's Roles property attaches to any existing
+      role by name regardless of which stack (or CLI command) created it —
+      unlike AWS::IAM::Role.ManagedPolicyArns, which only works on
+      stack-owned roles — so this fully automates the attachment with no
+      resource import and no custom resource needed.
+
+Resources:
+  # --- Cognito: JWT authorizer for the Gateway's inbound (orchestrator) hop ---
+  GatewayUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: agentaudit-mcp-gateway
+
+  GatewayUserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      UserPoolId: !Ref GatewayUserPool
+      Domain: !Sub "agentaudit-gateway-${AWS::AccountId}"
+
+  GatewayResourceServer:
+    Type: AWS::Cognito::UserPoolResourceServer
+    Properties:
+      UserPoolId: !Ref GatewayUserPool
+      Identifier: agentaudit-gateway
+      Name: agentaudit-gateway
+      Scopes:
+        - ScopeName: invoke
+          ScopeDescription: Invoke the agentaudit-mcp Gateway's tools
+
+  GatewayAppClient:
+    Type: AWS::Cognito::UserPoolClient
+    DependsOn: GatewayResourceServer
+    Properties:
+      UserPoolId: !Ref GatewayUserPool
+      ClientName: agentaudit-orchestration
+      GenerateSecret: true
+      AllowedOAuthFlows: [client_credentials]
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthScopes: ["agentaudit-gateway/invoke"]
+      SupportedIdentityProviders: [COGNITO]
+
+  # --- Secrets Manager: only the one value that's actually sensitive here ---
+  # MCP_GATEWAY_URL / MCP_GATEWAY_TOKEN_URL / MCP_GATEWAY_CLIENT_ID /
+  # MCP_GATEWAY_SCOPE are ordinary configuration, not secrets — they're set
+  # as plain environmentVariables on the orchestration Runtime via
+  # `update-agent-runtime` once this stack's outputs are known, not stored
+  # here.
+  McpGatewayClientSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: agentaudit/mcp-gateway-client-secret
+      SecretString: !GetAtt GatewayAppClient.ClientSecret
+
+  DatabaseUrlSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: agentaudit/database-url
+      Description: >
+        Placeholder — set the real Neon connection string with
+        `aws secretsmanager put-secret-value` after this stack deploys.
+        Never put the real value in this template.
+      SecretString: "REPLACE_ME"
+
+  OpenAiApiKeySecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: agentaudit/openai-api-key
+      Description: >
+        Placeholder — set the real key with
+        `aws secretsmanager put-secret-value` after this stack deploys.
+      SecretString: "REPLACE_ME"
+
+  # --- IAM: Gateway's outbound role, scoped to exactly the one Runtime ARN ---
+  GatewayExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: agentaudit-gateway-execution-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock-agentcore.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub "arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:*"
+      Policies:
+        - PolicyName: InvokeAgentAuditMcpRuntimeOnly
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: bedrock-agentcore:InvokeAgentRuntime
+                Resource: !Sub "arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:runtime/${AgentAuditMcpRuntimeId}"
+
+  # --- Resource-based policy on the target Runtime itself ---
+  # AgentCore cross-service invocation needs both sides: the identity-based
+  # policy above (what GatewayExecutionRole is allowed to call) and this
+  # resource-based policy (who agentaudit-mcp's Runtime accepts calls from)
+  # — the GatewayTarget sync failed with an authorization error until this
+  # was added, confirming both are required.
+  AgentAuditMcpRuntimeResourcePolicy:
+    Type: AWS::BedrockAgentCore::ResourcePolicy
+    Properties:
+      ResourceArn: !Sub "arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:runtime/${AgentAuditMcpRuntimeId}"
+      Policy: !Sub |
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "AWS": "${GatewayExecutionRole.Arn}"
+              },
+              "Action": "bedrock-agentcore:InvokeAgentRuntime",
+              "Resource": "arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:runtime/${AgentAuditMcpRuntimeId}"
+            }
+          ]
+        }
+
+  # --- Managed policy for the orchestration Runtime's execution role ---
+  # That role was created manually outside this stack, alongside the
+  # manually-created agentaudit_orchestration Runtime (see ADR 0002 for
+  # why: the agentcore CLI's per-package build context can't produce our
+  # two-sibling-package image). Roles: below attaches this policy to it
+  # directly — ManagedPolicy.Roles works on any existing role by name, no
+  # stack ownership required, so no manual attach-role-policy step needed.
+  OrchestrationSecretsAccessPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: agentaudit-orchestration-secrets-access
+      Roles:
+        - !Ref OrchestrationExecutionRoleName
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: secretsmanager:GetSecretValue
+            Resource:
+              - !Ref DatabaseUrlSecret
+              - !Ref OpenAiApiKeySecret
+              - !Ref McpGatewayClientSecret
+
+  # --- The Gateway itself: JWT-authenticated inbound, IAM-authenticated outbound ---
+  AgentAuditGateway:
+    Type: AWS::BedrockAgentCore::Gateway
+    Properties:
+      Name: agentaudit-mcp-gateway
+      RoleArn: !GetAtt GatewayExecutionRole.Arn
+      AuthorizerType: CUSTOM_JWT
+      AuthorizerConfiguration:
+        CustomJWTAuthorizer:
+          DiscoveryUrl: !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${GatewayUserPool}/.well-known/openid-configuration"
+          AllowedClients:
+            - !Ref GatewayAppClient
+      ProtocolConfiguration:
+        Mcp:
+          SupportedVersions: ["2025-06-18"]
+
+  # KNOWN LIMITATION (see docs/adr/0002-mcp-gateway-transport.md): this
+  # resource is defined to match the intended architecture but currently
+  # fails to stabilize (status FAILED, "Authorization error when sending
+  # message") when this template is deployed. Diagnosed down to: the
+  # identity-based policy on GatewayExecutionRole and the resource-based
+  # policy on the target Runtime (AgentAuditMcpRuntimeResourcePolicy) are
+  # both confirmed in place and correctly scoped; AssumeRole on
+  # GatewayExecutionRole succeeds (confirmed via CloudTrail); the actual
+  # InvokeAgentRuntime call is not logged (data-plane operation, not a
+  # default CloudTrail management event) so its exact rejection reason
+  # isn't directly observable. Root cause not yet isolated — deploying
+  # this template will create every other resource successfully and this
+  # one will fail/rollback on that failure alone.
+  AgentAuditGatewayTarget:
+    Type: AWS::BedrockAgentCore::GatewayTarget
+    DependsOn: AgentAuditMcpRuntimeResourcePolicy
+    Properties:
+      GatewayIdentifier: !GetAtt AgentAuditGateway.GatewayIdentifier
+      Name: agentaudit-mcp
+      TargetConfiguration:
+        Mcp:
+          McpServer:
+            Endpoint: !Sub "https://bedrock-agentcore.${AWS::Region}.amazonaws.com/runtimes/arn%3A${AWS::Partition}%3Abedrock-agentcore%3A${AWS::Region}%3A${AWS::AccountId}%3Aruntime%2F${AgentAuditMcpRuntimeId}/invocations"
+      CredentialProviderConfigurations:
+        - CredentialProviderType: GATEWAY_IAM_ROLE
+          CredentialProvider:
+            IamCredentialProvider:
+              Service: bedrock-agentcore
+              Region: !Ref AWS::Region
+
+Outputs:
+  GatewayUrl:
+    Value: !GetAtt AgentAuditGateway.GatewayUrl
+  GatewayTokenUrl:
+    Value: !Sub "https://agentaudit-gateway-${AWS::AccountId}.auth.${AWS::Region}.amazoncognito.com/oauth2/token"
+  GatewayClientId:
+    Value: !Ref GatewayAppClient
+  GatewayScope:
+    Value: "agentaudit-gateway/invoke"
+  OrchestrationSecretsPolicyArn:
+    Value: !Ref OrchestrationSecretsAccessPolicy

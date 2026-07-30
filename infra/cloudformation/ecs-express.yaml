@@ -1,0 +1,144 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  AgentAudit — Streamlit dashboard on Amazon ECS Express Mode, min tasks >= 1
+  (no scale-to-zero, per BUILD_DRILL's callback to the AusRegBench sleep
+  problem). Calls the deployed agentaudit_orchestration Runtime remotely and
+  reads audit_log/human_review_flags directly (read-only).
+
+  Replaces an earlier App Runner-based apprunner.yaml: App Runner stopped
+  accepting new customers on 2026-04-30 (confirmed via SubscriptionRequiredException
+  on this account, and via AWS's own announcement). ECS Express Mode is
+  AWS's own recommended successor (launched re:Invent Nov 2025). See
+  docs/adr/0003-dashboard-hosting-ecs-express.md for the full decision
+  record — this is a distinct architectural decision from ADR 0002 (which
+  covers the MCP Gateway transport), not a footnote on it.
+
+Parameters:
+  DashboardImageUri:
+    Type: String
+    Description: >
+      Full ECR image URI (with tag) for the agentaudit-dashboard image.
+      The ECR repository is created separately (aws ecr create-repository),
+      not by this stack, matching the pattern used for the AgentCore
+      Runtime workloads.
+  OrchestrationRuntimeArn:
+    Type: String
+    Description: ARN of the deployed agentaudit_orchestration AgentCore Runtime.
+  DatabaseUrlSecretArn:
+    Type: String
+    Description: ARN of the agentaudit/database-url secret (from gateway-and-iam.yaml).
+  Subnets:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: >
+      Subnets for the Express Mode service's networking (ECS Express Mode
+      runs inside a VPC, unlike App Runner's zero-VPC "PUBLIC" mode).
+      Defaults to this account's default VPC's public subnets across all
+      three ap-southeast-2 AZs.
+
+Resources:
+  DashboardInfrastructureRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: agentaudit-dashboard-infrastructure-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSInfrastructureRoleforExpressGatewayServices
+
+  DashboardExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: agentaudit-dashboard-execution-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: ReadDatabaseUrlSecretOnly
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref DatabaseUrlSecretArn
+
+  DashboardTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: agentaudit-dashboard-task-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: InvokeOrchestrationAgentOnly
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: bedrock-agentcore:InvokeAgentRuntime
+                # Confirmed 2026-07-29: AWS has evaluated this permission
+                # check against both the bare runtime ARN and the
+                # /runtime-endpoint/DEFAULT sub-resource on different
+                # occasions (same account, same call shape) — granting
+                # only one form left the other blocked. Cover both.
+                Resource:
+                  - !Ref OrchestrationRuntimeArn
+                  - !Sub "${OrchestrationRuntimeArn}/runtime-endpoint/DEFAULT"
+
+  DashboardExpressService:
+    Type: AWS::ECS::ExpressGatewayService
+    Properties:
+      ServiceName: agentaudit-dashboard
+      InfrastructureRoleArn: !GetAtt DashboardInfrastructureRole.Arn
+      ExecutionRoleArn: !GetAtt DashboardExecutionRole.Arn
+      TaskRoleArn: !GetAtt DashboardTaskRole.Arn
+      Cpu: "256"
+      Memory: "512"
+      # CONFIRMED 2026-07-29 (ADR not yet written): must be a bare path, not
+      # the classic ELB "HTTP:<port><path>" syntax used here previously.
+      # That older value made every CreateTargetGroup call the Express Mode
+      # control plane issued fail with ValidationException, retried every
+      # ~10s indefinitely — CreateListener, RegisterTaskDefinition, and
+      # RunTask never ran as a result. This was the actual cause of the
+      # runningCount/pendingCount 0/0, empty-event-log hang across all
+      # deploy attempts on 2026-07-28 and 2026-07-29, reproduced live via
+      # CloudTrail during a redeploy. (An earlier theory blaming stalled
+      # ACM certificate issuance for the auto-generated on.aws domain is
+      # unconfirmed and probably wrong — that check only looked at unique
+      # CloudTrail event names for the 2026-07-28 attempt, not call counts,
+      # so it couldn't rule out this same CreateTargetGroup loop.)
+      HealthCheckPath: "/_stcore/health"
+      NetworkConfiguration:
+        Subnets: !Ref Subnets
+      ScalingTarget:
+        MinTaskCount: 1
+        MaxTaskCount: 3
+      PrimaryContainer:
+        Image: !Ref DashboardImageUri
+        ContainerPort: 8501
+        Environment:
+          - Name: AWS_REGION
+            Value: !Ref AWS::Region
+          - Name: ORCHESTRATION_RUNTIME_ARN
+            Value: !Ref OrchestrationRuntimeArn
+        Secrets:
+          - Name: DATABASE_URL
+            ValueFrom: !Ref DatabaseUrlSecretArn
+
+Outputs:
+  ServiceEndpoint:
+    Value: !GetAtt DashboardExpressService.Endpoint

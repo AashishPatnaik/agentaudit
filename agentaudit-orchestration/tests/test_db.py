@@ -18,7 +18,7 @@ def _mock_connection():
 
 
 @patch("agentaudit_orchestration.db._connect")
-def test_set_local_runs_before_callers_write_then_commits(mock_connect):
+def test_set_transaction_read_write_runs_before_callers_write_then_commits(mock_connect):
     conn, cursor = _mock_connection()
     mock_connect.return_value = conn
 
@@ -26,10 +26,11 @@ def test_set_local_runs_before_callers_write_then_commits(mock_connect):
         cur.execute("INSERT INTO audit_log VALUES (%s)", ("row",))
 
     # Two cursor().execute() calls happened on the same underlying cursor
-    # mock: get_audit_connection's own SET LOCAL, then the caller's write.
-    # Order matters — SET LOCAL must run first, in the same transaction.
+    # mock: get_audit_connection's own SET TRANSACTION READ WRITE, then the
+    # caller's write. Order matters — it must run first, as the first
+    # statement of the transaction, in the same transaction as the write.
     assert cursor.execute.call_args_list == [
-        (("SET LOCAL default_transaction_read_only = off",), {}),
+        (("SET TRANSACTION READ WRITE",), {}),
         (("INSERT INTO audit_log VALUES (%s)", ("row",)), {}),
     ]
     conn.commit.assert_called_once()

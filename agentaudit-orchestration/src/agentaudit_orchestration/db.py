@@ -47,16 +47,34 @@ def get_audit_connection() -> Iterator[psycopg2.extensions.connection]:
     and could land on a backend that never saw that override, still
     carrying read-only state left by one of agentaudit_mcp's own
     `readonly=True` connections. Confirmed live: "cannot execute INSERT in
-    a read-only transaction" recurring intermittently throughout a run,
-    well after an earlier write on the same logical connection succeeded.
+    a read-only transaction" recurring throughout a run, well after an
+    earlier write on the same logical connection succeeded.
 
-    Fix: autocommit off, and `SET LOCAL default_transaction_read_only =
-    off` issued as the first statement of the transaction, immediately
-    before yielding. SET LOCAL is scoped to the current transaction, and
-    the pooler guarantees one backend for that transaction's whole
-    lifetime (BEGIN through COMMIT/ROLLBACK) — so it's guaranteed to apply
-    to whatever backend actually executes the caller's write, regardless
-    of that backend's prior state. Callers need no changes: every existing
+    Fix: autocommit off, and `SET TRANSACTION READ WRITE` issued as the
+    first statement of the transaction, immediately before yielding.
+
+    An earlier version of this fix used `SET LOCAL
+    default_transaction_read_only = off` here instead — confirmed live
+    (standalone repro against a session with `SET SESSION CHARACTERISTICS
+    AS TRANSACTION READ ONLY` already applied) to be a complete no-op:
+    `default_transaction_read_only` only sets the default read-only mode
+    for transactions that *begin after* it's changed. But `BEGIN` fires as
+    part of sending that very statement — Postgres locks in the current
+    transaction's `transaction_read_only` status from whatever the session
+    default already was at that instant, before the `SET LOCAL` assignment
+    takes effect. Being `LOCAL`-scoped, it then reverts before any later
+    transaction could benefit from it either. So it never overrode
+    anything, in either direction. `SET TRANSACTION READ WRITE` is a
+    different command entirely: it sets `transaction_read_only = off` for
+    the transaction already in progress directly, not a default for one
+    that hasn't started — which is exactly what's needed here, and why it
+    must (and does, per Postgres' rules for this command) run as the first
+    statement of the transaction.
+
+    Because the pooler guarantees one backend for a transaction's whole
+    lifetime (BEGIN through COMMIT/ROLLBACK), this now reliably applies to
+    whatever backend actually executes the caller's write, regardless of
+    that backend's prior state. Callers need no changes: every existing
     call site already does exactly one write per `get_audit_connection()`
     context, which is exactly the unit this fix operates on. Commits on
     clean exit, rolls back on exception.
@@ -64,7 +82,7 @@ def get_audit_connection() -> Iterator[psycopg2.extensions.connection]:
     conn = _connect()
     try:
         with conn.cursor() as cur:
-            cur.execute("SET LOCAL default_transaction_read_only = off")
+            cur.execute("SET TRANSACTION READ WRITE")
         yield conn
         conn.commit()
     except Exception:

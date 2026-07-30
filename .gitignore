@@ -4,3 +4,10 @@ __pycache__/
 .env
 .DS_Store
 *.egg-info/
+
+# AgentCore CLI local state (account-specific, not portable)
+.bedrock_agentcore.yaml
+.bedrock_agentcore/
+
+# Build artifacts
+build/

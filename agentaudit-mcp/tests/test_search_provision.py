@@ -27,7 +27,7 @@ def _mock_get_connection(rows: list[tuple[object, ...]]):
 @patch("agentaudit_mcp.tools.search_provision.embed_query", return_value=np.array([0.1, 0.2, 0.3]))
 @patch("agentaudit_mcp.tools.search_provision.get_connection")
 def test_search_provision_returns_ranked_results(mock_get_connection, mock_embed_query):
-    fake_get_connection, mock_cursor = _mock_get_connection(
+    fake_get_connection, _mock_cursor = _mock_get_connection(
         [(1, "banking_act_1959", "5(1)", "primary_legislation", "An ADI must...", 0.87)]
     )
     mock_get_connection.side_effect = fake_get_connection

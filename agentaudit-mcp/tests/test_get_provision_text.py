@@ -24,7 +24,7 @@ def _mock_get_connection(rows: list[tuple[object, ...]]):
 
 @patch("agentaudit_mcp.tools.get_provision_text.get_connection")
 def test_get_provision_text_joins_multiple_chunks_in_order(mock_get_connection):
-    fake_get_connection, mock_cursor = _mock_get_connection(
+    fake_get_connection, _mock_cursor = _mock_get_connection(
         [(1, "An ADI must hold capital."), (2, "Additional detail on capital adequacy.")]
     )
     mock_get_connection.side_effect = fake_get_connection

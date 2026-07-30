@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 
@@ -19,7 +21,13 @@ register_get_related_provisions(mcp)
 
 
 def main() -> None:
-    mcp.run()
+    transport = os.environ.get("MCP_TRANSPORT", "stdio")
+    if transport == "streamable-http":
+        mcp.settings.host = "0.0.0.0"
+        mcp.settings.port = int(os.environ.get("PORT", "8080"))
+        mcp.run(transport="streamable-http")
+    else:
+        mcp.run()
 
 
 if __name__ == "__main__":

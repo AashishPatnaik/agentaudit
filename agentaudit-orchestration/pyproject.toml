@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Coordinator, specialist subagents, and synthesis agent for AgentAudit, built on the Claude Agent SDK routed through Bedrock."
 requires-python = ">=3.12"
 dependencies = [
+    "agentaudit-mcp",
     "claude-agent-sdk>=0.2.128",
     "python-dotenv>=1.0",
     "pydantic>=2.7",
@@ -17,6 +18,9 @@ dev = ["pytest>=8.0", "ruff>=0.6"]
 
 [project.scripts]
 agentaudit-orchestration = "agentaudit_orchestration.run_example:main"
+
+[tool.uv.sources]
+agentaudit-mcp = { path = "../agentaudit-mcp" }
 
 [build-system]
 requires = ["setuptools>=68"]

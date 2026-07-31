@@ -1,0 +1,65 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-agentaudit-mcp:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9
+      - name: Install dependencies
+        working-directory: agentaudit-mcp
+        run: uv sync --extra dev
+      - name: Run tests
+        working-directory: agentaudit-mcp
+        run: uv run pytest
+
+  test-agentaudit-orchestration:
+    runs-on: ubuntu-latest
+    env:
+      # Dummy values: agentcore_app.py's module-level _load_secrets_into_env()
+      # only skips its Secrets Manager fetch (which would fail with no AWS
+      # credentials in CI) if these are already set. build_options() is
+      # evaluated as a call argument in several tests even though query()
+      # itself is mocked, so CLAUDE_CODE_USE_BEDROCK/AWS_REGION must be set
+      # too or load_bedrock_env() raises. Nothing here needs to be real —
+      # every test mocks the actual DB/AWS calls.
+      DATABASE_URL: postgresql://test:test@localhost/test
+      OPENAI_API_KEY: sk-test-dummy
+      CLAUDE_CODE_USE_BEDROCK: "1"
+      AWS_REGION: ap-southeast-2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9
+      - name: Install dependencies
+        working-directory: agentaudit-orchestration
+        run: uv sync --extra dev
+      - name: Run tests
+        working-directory: agentaudit-orchestration
+        run: uv run pytest
+
+  test-agentaudit-dashboard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9
+      - name: Install dependencies
+        working-directory: agentaudit-dashboard
+        run: uv sync --extra dev
+      - name: Run tests
+        working-directory: agentaudit-dashboard
+        run: uv run pytest

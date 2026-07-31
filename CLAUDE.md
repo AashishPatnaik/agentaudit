@@ -10,7 +10,9 @@
 - No real-world actions (no auto-filing, no auto-emailing). Research and
   flag only — humans act.
 - Deployment: AWS, frozen as Bedrock (model access) + AgentCore Runtime
-  (agent hosting) + App Runner (dashboard). No re-litigating mid-build.
+  (agent hosting) + ECS Express Mode (dashboard — App Runner closed to new
+  accounts 2026-04-30, forcing this pivot; see ADR 0003). No re-litigating
+  mid-build.
 
 ## Non-negotiable requirements
 - Every tool call logged: agent, tool, input, output, timestamp, confidence
@@ -23,7 +25,7 @@
 ## Stack (frozen)
 Claude Agent SDK · custom MCP server (Python MCP SDK) · PostgreSQL + pgvector
 · Pydantic · GitHub Actions · Amazon Bedrock (model access) ·
-Amazon Bedrock AgentCore Runtime (deployment) · AWS App Runner (dashboard) · Streamlit
+Amazon Bedrock AgentCore Runtime (deployment) · Amazon ECS Express Mode (dashboard) · Streamlit
 
 Known constraint (2026-07-29): this AWS account's Bedrock model access is
 currently limited to Claude 4.x-generation models — Sonnet 5 and Opus 5 both

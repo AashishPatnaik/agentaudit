@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import Any
 
 import boto3
@@ -32,10 +33,6 @@ _MAX_ATTEMPTS = 3
 _RETRY_DELAY_SECONDS = 3
 _COLD_START_ERROR_CODE = "RuntimeClientError"
 _COLD_START_MESSAGE_MARKER = "Runtime initialization time exceeded"
-
-# Event types agentcore_app.invoke() never treats as final — see that
-# module's docstring for the full event-type contract.
-_NON_TERMINAL_EVENT_TYPES = {"heartbeat", "progress"}
 
 
 def _is_cold_start_timeout(exc: Exception) -> bool:
@@ -75,22 +72,43 @@ def _iter_sse_events(response_body: Any) -> Iterator[dict]:
             continue
 
 
-def _consume_stream(response_body: Any) -> dict:
+def _consume_stream(
+    response_body: Any,
+    on_progress: Callable[[dict], None] | None = None,
+) -> dict:
     """Drain an invoke_agent_runtime SSE stream down to the one terminal
-    event, discarding heartbeat/progress events, and return it with the
-    "type" key stripped — so callers keep getting exactly today's flat
-    {"session_id", "answer", "citations", "flags"} or {"error": ...} shape
-    regardless of the streaming transport underneath.
+    event and return it with the "type" key stripped — so callers keep
+    getting exactly today's flat {"session_id", "answer", "citations",
+    "flags"} or {"error": ...} shape regardless of the streaming transport
+    underneath.
+
+    heartbeat events are pure keep-alive and always discarded. progress
+    events are forwarded to on_progress (raw event dict, unmodified) as
+    they arrive, when a callback is given — otherwise discarded too, which
+    reproduces this function's behavior exactly as it was before this
+    parameter existed.
     """
     for event in _iter_sse_events(response_body):
-        if event.get("type") in _NON_TERMINAL_EVENT_TYPES:
+        event_type = event.get("type")
+        if event_type == "heartbeat":
+            continue
+        if event_type == "progress":
+            if on_progress is not None:
+                try:
+                    on_progress(event)
+                except Exception:
+                    logging.exception("on_progress callback raised; ignoring")
             continue
         return {key: value for key, value in event.items() if key != "type"}
 
     return {"error": "Orchestration agent's stream ended without a final result."}
 
 
-def invoke_orchestration_agent(question: str) -> dict:
+def invoke_orchestration_agent(
+    question: str,
+    *,
+    on_progress: Callable[[dict], None] | None = None,
+) -> dict:
     """Call the deployed agentaudit_orchestration AgentCore Runtime with a
     new question. Returns the same {"error": ...} shape agentcore_app.py's
     invoke() uses for internal failures, for network/auth failures that
@@ -106,7 +124,12 @@ def invoke_orchestration_agent(question: str) -> dict:
     ever retries on the specific ClientError shape that can only occur on
     the initial invoke_agent_runtime() call itself (before any streaming
     begins), so a genuine mid-stream failure still fails immediately
-    rather than being mistaken for a cold start and retried.
+    rather than being mistaken for a cold start and retried — which also
+    means on_progress can never be double-invoked for the same stage
+    across a retry.
+
+    on_progress, when given, is forwarded to _consume_stream for each
+    progress event as it arrives — see that function's docstring.
     """
     client = boto3.client(
         "bedrock-agentcore", region_name=os.environ.get("AWS_REGION"), config=_CLIENT_CONFIG
@@ -122,7 +145,7 @@ def invoke_orchestration_agent(question: str) -> dict:
                 contentType="application/json",
                 accept="text/event-stream",
             )
-            return _consume_stream(response["response"])
+            return _consume_stream(response["response"], on_progress=on_progress)
         except Exception as exc:
             last_error = exc
             if not _is_cold_start_timeout(exc) or attempt == _MAX_ATTEMPTS:

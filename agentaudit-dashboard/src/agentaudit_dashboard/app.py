@@ -565,8 +565,9 @@ elif page_mode == "Audit trail":
     run_id = st.text_input("Run ID", value=st.session_state.get("last_run_id", ""))
     if run_id:
         try:
-            audit_rows = get_audit_trail(run_id)
-            flag_rows = get_human_review_flags(run_id)
+            with st.spinner("Loading audit trail..."):
+                audit_rows = get_audit_trail(run_id)
+                flag_rows = get_human_review_flags(run_id)
         except Exception as exc:
             st.error(f"Failed to load audit trail: {exc}")
         else:

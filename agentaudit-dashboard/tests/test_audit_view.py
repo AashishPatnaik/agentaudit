@@ -89,4 +89,4 @@ def test_get_human_review_flags_returns_empty_list_when_none_flagged(mock_get_co
     fake_get_connection, _ = _mock_get_connection([])
     mock_get_connection.side_effect = fake_get_connection
 
-    assert get_human_review_flags("run-123") == []
+    assert get_human_review_flags("run-456") == []

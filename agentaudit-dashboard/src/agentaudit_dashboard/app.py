@@ -32,6 +32,9 @@ st.markdown(
         --aa-purple: #A855F7;
         --aa-purple-bg: rgba(168, 85, 247, 0.14);
         --aa-purple-border: rgba(168, 85, 247, 0.4);
+        --aa-amber: #F59E0B;
+        --aa-amber-bg: rgba(245, 158, 11, 0.14);
+        --aa-amber-border: rgba(245, 158, 11, 0.4);
         --aa-glow: rgba(139, 92, 246, 0.28);
     }
 
@@ -107,6 +110,10 @@ st.markdown(
         background: var(--aa-purple-bg);
         border: 1px solid var(--aa-purple-border);
     }
+    .aa-icon-amber {
+        background: var(--aa-amber-bg);
+        border: 1px solid var(--aa-amber-border);
+    }
     .aa-icon-gradient {
         background: linear-gradient(135deg, var(--aa-blue), var(--aa-purple));
         border: none;
@@ -135,6 +142,7 @@ st.markdown(
     }
     [class*="st-key-card_specific_"] { border-left-color: var(--aa-blue); }
     [class*="st-key-card_crossref_"] { border-left-color: var(--aa-purple); }
+    [class*="st-key-card_quick_"] { border-left-color: var(--aa-amber); }
     [class*="st-key-card_"]:hover {
         transform: translateY(-2px);
         box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
@@ -223,6 +231,14 @@ st.markdown(
 )
 
 EXAMPLE_QUESTIONS = {
+    "Quick": [
+        ("What does CPS 234 paragraph 12(d) define as an 'information asset'?", "8m"),
+        (
+            "What does CPS 230 paragraph 26 require regarding review and "
+            "testing of response plans?",
+            "8m 42s",
+        ),
+    ],
     "Specific": [
         ("What are the record-keeping obligations under CPS 234?", "20m 8s"),
         ("What does CPS 230 require regarding business continuity planning?", "28m"),
@@ -255,6 +271,14 @@ EXAMPLE_QUESTIONS = {
 }
 
 CATEGORY_META = {
+    "Quick": {
+        "icon": "⚡",
+        "css_group": "quick",
+        "icon_css": "aa-icon-amber",
+        "title": "Quick Question Examples",
+        "subtitle": "Narrow, paragraph-level lookups — typically the fastest answers we can give.",
+        "panel_key": "panel_quick",
+    },
     "Specific": {
         "icon": "📄",
         "css_group": "specific",
@@ -565,9 +589,8 @@ elif page_mode == "Audit trail":
     run_id = st.text_input("Run ID", value=st.session_state.get("last_run_id", ""))
     if run_id:
         try:
-            with st.spinner("Loading audit trail..."):
-                audit_rows = get_audit_trail(run_id)
-                flag_rows = get_human_review_flags(run_id)
+            audit_rows = get_audit_trail(run_id)
+            flag_rows = get_human_review_flags(run_id)
         except Exception as exc:
             st.error(f"Failed to load audit trail: {exc}")
         else:

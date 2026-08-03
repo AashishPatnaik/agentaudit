@@ -224,7 +224,7 @@ st.markdown(
 
 EXAMPLE_QUESTIONS = {
     "Specific": [
-        ("What are the record-keeping obligations under CPS 234?", "15m 34s"),
+        ("What are the record-keeping obligations under CPS 234?", "20m 8s"),
         ("What does CPS 230 require regarding business continuity planning?", "28m"),
         ("What are directors' duties under Part 2D.1 of the Corporations Act 2001?", "24m 46s"),
         ("What capital adequacy requirements does the Banking Act 1959 impose on ADIs?", "31m 12s"),
@@ -372,7 +372,12 @@ def _render_job_progress():
         else:
             result = {"error": "The research job ended unexpectedly."}
         st.session_state["job_result"] = result
-        st.session_state["job_status"] = "done"
+        # Not "done" — job_status only ever needs to distinguish "running"
+        # from "not running"; job_result (persisted, not cleared here or in
+        # the render block below) is now the sole signal for "is there a
+        # result to show," independent of how many reruns pass before it's
+        # actually looked at.
+        st.session_state["job_status"] = None
         # One-time auto-scroll to the results panel on completion too — see
         # the matching set-point at job start, below. Both rely on the fact
         # that plain st.rerun() always triggers a full app rerun, never a
@@ -400,7 +405,11 @@ page_mode = st.session_state["page_mode"]
 
 if page_mode == "Ask a question":
     running = st.session_state.get("job_status") == "running"
-    done = st.session_state.get("job_status") == "done"
+    # Not tied to "the one rerun where completion was detected" — a
+    # persisted result stays displayable across any number of reruns
+    # (including page navigation via segmented_control, which reruns the
+    # whole script) until a new job explicitly clears job_result at start.
+    has_result = st.session_state.get("job_result") is not None
 
     for group_name, examples in EXAMPLE_QUESTIONS.items():
         meta = CATEGORY_META[group_name]
@@ -463,23 +472,24 @@ if page_mode == "Ask a question":
                 help="Ask this question",
             )
 
+    st.markdown(
+        '<div class="aa-panel-subtitle">Observed times are from a single real '
+        "run each — actual runs may vary by up to 4-6+ minutes.</div>",
+        unsafe_allow_html=True,
+    )
+
     # --- Results panel: now rendered last, after the example grids and the
     # custom-question panel, reversing the earlier scroll-to-top fix — the
     # compact 2-column grid keeps the page short enough that a natural
     # top-to-bottom "ask, then see the answer below" flow reads fine, like a
     # search-results page. Only instantiated while there's something to
     # show, so it adds no empty box when idle.
-    if running or done:
+    if running or has_result:
         with st.container(key="results_panel"):
             if running:
                 _render_job_progress()
-
-            if done:
+            else:
                 result = st.session_state["job_result"]
-                st.session_state["job_status"] = None
-                st.session_state["job_result"] = None
-                st.session_state["job_thread"] = None
-                st.session_state["job_queue"] = None
 
                 if "error" in result:
                     st.error(result["error"])

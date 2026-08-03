@@ -338,6 +338,7 @@ st.session_state.setdefault("job_started_at", None)
 st.session_state.setdefault("job_stage_text", "")
 st.session_state.setdefault("job_result", None)
 st.session_state.setdefault("page_mode", "Ask a question")
+st.session_state.setdefault("scroll_pending", False)
 
 
 @st.fragment(run_every=_TICK_SECONDS)
@@ -372,6 +373,12 @@ def _render_job_progress():
             result = {"error": "The research job ended unexpectedly."}
         st.session_state["job_result"] = result
         st.session_state["job_status"] = "done"
+        # One-time auto-scroll to the results panel on completion too — see
+        # the matching set-point at job start, below. Both rely on the fact
+        # that plain st.rerun() always triggers a full app rerun, never a
+        # fragment-scoped one, guaranteeing this is read and cleared exactly
+        # once on the very next script pass.
+        st.session_state["scroll_pending"] = True
         st.rerun()
         return
 
@@ -494,6 +501,35 @@ if page_mode == "Ask a question":
                     else:
                         st.success("All citations verified — nothing flagged.")
 
+    # One-time auto-scroll to the results panel — fires on both job start
+    # and job completion (see scroll_pending set-points), never on the
+    # fragment's own run_every ticks in between. st.html's
+    # unsafe_allow_javascript executes directly in the main page (unlike
+    # st.iframe, which would need window.parent.document). The outer script
+    # doesn't re-execute during the running phase (only the fragment's own
+    # ticks do), so the job-start call's DOM node just persists untouched
+    # until completion triggers the next full rerun — at which point a
+    # second call with byte-identical static content gets silently
+    # deduplicated by Streamlit's diffing (no DOM mutation sent, so the
+    # script never re-executes) unless the content actually differs. An
+    # HTML comment carrying a uniqueness token doesn't survive — st.html
+    # sanitizes with DOMPurify (confirmed live: the comment was stripped
+    # from the DOM entirely even with unsafe_allow_javascript=True), so the
+    # token has to live inside the executable script content itself, which
+    # must survive intact.
+    if st.session_state.get("scroll_pending"):
+        st.session_state["scroll_pending"] = False
+        st.html(
+            f"""
+            <script>
+            // scroll trigger token: {time.monotonic()}
+            document.querySelector('[class*="st-key-results_panel"]')
+                ?.scrollIntoView({{behavior: "smooth", block: "start"}});
+            </script>
+            """,
+            unsafe_allow_javascript=True,
+        )
+
     run_research = send_clicked or st.session_state["auto_submit"]
     st.session_state["auto_submit"] = False
 
@@ -507,6 +543,7 @@ if page_mode == "Ask a question":
         st.session_state["job_started_at"] = time.monotonic()
         st.session_state["job_stage_text"] = "starting research..."
         st.session_state["job_result"] = None
+        st.session_state["scroll_pending"] = True
         # A full rerun (not the fragment-scoped run_every reruns above) is
         # the only way the disabled=running text_area/buttons above ever
         # see job_status=="running" — otherwise they'd stay enabled for the

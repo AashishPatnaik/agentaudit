@@ -492,9 +492,37 @@ if page_mode == "Ask a question":
                 "",
                 icon=":material/send:",
                 key="send_btn",
-                disabled=not question or running,
+                disabled=running,
                 help="Ask this question",
             )
+
+    st.html(
+        """
+        <script>
+        if (!window.__aaEnterSubmitInstalled) {
+            window.__aaEnterSubmitInstalled = true;
+            document.addEventListener("keydown", function (e) {
+                if (e.key !== "Enter" || e.shiftKey) return;
+                if (!e.target.matches(".st-key-ask_own_input_wrap textarea")) return;
+                e.preventDefault();
+                const btn = document.querySelector('[class*="st-key-send_btn"] button');
+                if (btn && !btn.disabled) {
+                    // Plain Enter never flushes the textarea's value to
+                    // Streamlit on its own (only blur or Ctrl+Enter does —
+                    // confirmed live, the textarea's own hint says "Press
+                    // Ctrl+Enter to apply"). Explicit blur() first
+                    // reproduces the same sequence a real user's
+                    // click-elsewhere produces, so the click's rerun
+                    // carries the just-typed text, not a stale/empty value.
+                    e.target.blur();
+                    btn.click();
+                }
+            });
+        }
+        </script>
+        """,
+        unsafe_allow_javascript=True,
+    )
 
     st.markdown(
         '<div class="aa-panel-subtitle">Observed times are from a single real '
@@ -568,22 +596,25 @@ if page_mode == "Ask a question":
     st.session_state["auto_submit"] = False
 
     if run_research and st.session_state["job_status"] != "running":
-        job_queue: queue.Queue = queue.Queue()
-        thread = threading.Thread(target=_run_research_job, args=(question, job_queue), daemon=True)
-        thread.start()
-        st.session_state["job_status"] = "running"
-        st.session_state["job_queue"] = job_queue
-        st.session_state["job_thread"] = thread
-        st.session_state["job_started_at"] = time.monotonic()
-        st.session_state["job_stage_text"] = "starting research..."
-        st.session_state["job_result"] = None
-        st.session_state["scroll_pending"] = True
-        # A full rerun (not the fragment-scoped run_every reruns above) is
-        # the only way the disabled=running text_area/buttons above ever
-        # see job_status=="running" — otherwise they'd stay enabled for the
-        # entire run, since this outer code never re-executes until the
-        # fragment's own st.rerun() on completion.
-        st.rerun()
+        if not question.strip():
+            st.warning("Please enter a question before sending.")
+        else:
+            job_queue: queue.Queue = queue.Queue()
+            thread = threading.Thread(target=_run_research_job, args=(question, job_queue), daemon=True)
+            thread.start()
+            st.session_state["job_status"] = "running"
+            st.session_state["job_queue"] = job_queue
+            st.session_state["job_thread"] = thread
+            st.session_state["job_started_at"] = time.monotonic()
+            st.session_state["job_stage_text"] = "starting research..."
+            st.session_state["job_result"] = None
+            st.session_state["scroll_pending"] = True
+            # A full rerun (not the fragment-scoped run_every reruns above) is
+            # the only way the disabled=running text_area/buttons above ever
+            # see job_status=="running" — otherwise they'd stay enabled for the
+            # entire run, since this outer code never re-executes until the
+            # fragment's own st.rerun() on completion.
+            st.rerun()
 
 elif page_mode == "Audit trail":
     run_id = st.text_input("Run ID", value=st.session_state.get("last_run_id", ""))
